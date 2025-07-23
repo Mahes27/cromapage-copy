@@ -4,14 +4,18 @@ import {
   Home, DollarSign, Plane, GraduationCap, Menu, ChevronLeft
 } from 'lucide-react';
 import AddStudentModal from './AddStudentModal';
+import { v4 as uuidv4 } from 'uuid';
+
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
 
+
   static getDerivedStateFromError(error) {
     return { hasError: true, error };
   }
+
 
   render() {
     if (this.state.hasError) {
@@ -34,6 +38,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+
 export default function MainScreen({ onLogout }) {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -49,9 +54,11 @@ export default function MainScreen({ onLogout }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage] = useState(10);
 
+
   const profileRef = useRef(null);
   const filterRef = useRef(null);
   const LOCAL_KEY = 'localStudents';
+
 
   const menuItems = [
     { name: 'Home', icon: Home, path: '/home' },
@@ -59,6 +66,7 @@ export default function MainScreen({ onLogout }) {
     { name: 'Travel', icon: Plane, path: '/travel' },
     { name: 'Academic', icon: GraduationCap, path: '/academic' },
   ];
+
 
   const getLocalStudents = () => {
     try {
@@ -71,12 +79,22 @@ export default function MainScreen({ onLogout }) {
     }
   };
 
+
   const saveLocalStudent = (student) => {
     const localStudents = getLocalStudents();
     localStudents.unshift(student);
     localStorage.setItem(LOCAL_KEY, JSON.stringify(localStudents));
     console.log('MainScreen: Saved local student', student);
   };
+
+
+  const removeLocalStudent = (id) => {
+    const localStudents = getLocalStudents();
+    const updatedStudents = localStudents.filter((s) => s.id !== id);
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(updatedStudents));
+    console.log('MainScreen: Removed local student with id', id);
+  };
+
 
   useEffect(() => {
     const fetchStudents = async () => {
@@ -89,8 +107,12 @@ export default function MainScreen({ onLogout }) {
         const localStudents = getLocalStudents();
         const localIds = new Set(localStudents.map((s) => s.id || s.mail));
         const filteredApi = data.filter((s) => !localIds.has(s.id || s.mail));
-        setStudents([...localStudents, ...filteredApi]);
-        console.log('MainScreen: Students set', [...localStudents, ...filteredApi]);
+        const allStudents = [...localStudents, ...filteredApi];
+        const uniqueStudents = Array.from(
+          new Map(allStudents.map(student => [student.id ? `${student.id}-${student.mail}` : student.mail, student])).values()
+        );
+        setStudents(uniqueStudents);
+        console.log('MainScreen: Students set', uniqueStudents.map(s => ({ id: s.id, firstname: s.firstname, mail: s.mail })));
       } catch (error) {
         console.error('MainScreen: Error fetching students:', error);
       } finally {
@@ -99,6 +121,7 @@ export default function MainScreen({ onLogout }) {
     };
     fetchStudents();
   }, []);
+
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -113,11 +136,34 @@ export default function MainScreen({ onLogout }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+
+  // Define filteredStudents and sortedStudents before useEffect
+  const filteredStudents = students.filter((s) => {
+    const term = searchTerm.toLowerCase();
+    if (!term) return true;
+    if (filterType === 'all' || filterType === 'firstname') {
+      const value = String(s.firstname || '').toLowerCase();
+      return value.startsWith(term);
+    }
+    const value = String(s[filterType] || '').toLowerCase();
+    return value.includes(term);
+  });
+
+
+  const sortedStudents = searchTerm ? sortStudents(filteredStudents) : filteredStudents;
+
+
+  useEffect(() => {
+    console.log('MainScreen: Search term changed to', searchTerm, 'filteredStudents:', filteredStudents.map(s => s.firstname), 'sortedStudents:', sortedStudents.map(s => s.firstname));
+  }, [searchTerm, filteredStudents, sortedStudents]);
+
+
   const handleLogout = () => {
     console.log('MainScreen: Logging out');
     sessionStorage.removeItem('isLoggedIn');
     onLogout();
   };
+
 
   const sortStudents = (studentsToSort) => {
     return [...studentsToSort].sort((a, b) => {
@@ -127,21 +173,13 @@ export default function MainScreen({ onLogout }) {
     });
   };
 
-  const filteredStudents = students.filter((s) => {
-    const term = searchTerm.toLowerCase();
-    if (!term) return true;
-    const value = String(s.firstname || '').toLowerCase();
-    return value.startsWith(term);
-  });
-
-  const sortedStudents = sortStudents(filteredStudents);
 
   const handleSearchChange = (e) => {
     const newTerm = e.target.value;
     setSearchTerm(newTerm);
-    setCurrentPage(1); // Reset to first page on search change
-    console.log('MainScreen: Search term changed to', newTerm, 'filteredStudents:', filteredStudents.map(s => s.firstname));
+    setCurrentPage(1);
   };
+
 
   const handleAddStudent = async (newStudent) => {
     try {
@@ -154,18 +192,26 @@ export default function MainScreen({ onLogout }) {
       if (!response.ok) throw new Error('Failed to add student');
       const addedStudent = await response.json();
       saveLocalStudent(addedStudent);
-      setStudents((prev) => [addedStudent, ...prev]);
+      setStudents((prev) => {
+        const updated = [addedStudent, ...prev];
+        return Array.from(new Map(updated.map(student => [student.id ? `${student.id}-${student.mail}` : student.mail, student])).values());
+      });
+      // Reset pagination and search to ensure new student is visible
+      setCurrentPage(1);
+      setSearchTerm('');
       console.log('MainScreen: Student added successfully', addedStudent);
     } catch (error) {
       console.error('MainScreen: Error adding student:', error);
     }
   };
 
+
   const handleEditStudent = (student) => {
     console.log('MainScreen: Editing student', student);
     setCurrentStudent({ ...student });
     setEditModalOpen(true);
   };
+
 
   const handleDeleteStudent = async (id) => {
     if (!window.confirm('Delete this student?')) return;
@@ -174,13 +220,30 @@ export default function MainScreen({ onLogout }) {
       const response = await fetch(`https://687b2e57b4bc7cfbda84e292.mockapi.io/users/${id}`, {
         method: 'DELETE',
       });
-      if (!response.ok) throw new Error('Delete failed');
-      setStudents((prev) => prev.filter((s) => s.id !== id));
-      console.log('MainScreen: Student deleted successfully', id);
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.warn('MainScreen: Student with id', id, 'not found on server, removing from local state');
+          setStudents((prev) => {
+            const updated = prev.filter((s) => s.id !== id);
+            return Array.from(new Map(updated.map(student => [student.id ? `${student.id}-${student.mail}` : student.mail, student])).values());
+          });
+          removeLocalStudent(id); // Sync localStorage with 404 case
+        } else {
+          throw new Error('Delete failed');
+        }
+      } else {
+        setStudents((prev) => {
+          const updated = prev.filter((s) => s.id !== id);
+          return Array.from(new Map(updated.map(student => [student.id ? `${student.id}-${student.mail}` : student.mail, student])).values());
+        });
+        removeLocalStudent(id); // Sync localStorage with successful delete
+        console.log('MainScreen: Student deleted successfully', id);
+      }
     } catch (error) {
       console.error('MainScreen: Error deleting student:', error);
     }
   };
+
 
   const handleUpdateStudent = async (e) => {
     e.preventDefault();
@@ -196,9 +259,10 @@ export default function MainScreen({ onLogout }) {
       );
       if (!response.ok) throw new Error('Update failed');
       const updatedStudent = await response.json();
-      setStudents((prev) =>
-        prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s))
-      );
+      setStudents((prev) => {
+        const updated = prev.map((s) => (s.id === updatedStudent.id ? updatedStudent : s));
+        return Array.from(new Map(updated.map(student => [student.id ? `${student.id}-${student.mail}` : student.mail, student])).values());
+      });
       setEditModalOpen(false);
       setCurrentStudent(null);
       console.log('MainScreen: Student updated successfully', updatedStudent);
@@ -207,10 +271,12 @@ export default function MainScreen({ onLogout }) {
     }
   };
 
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setCurrentStudent((prev) => ({ ...prev, [name]: value }));
   };
+
 
   const filterOptions = [
     { key: 'all', label: 'All' },
@@ -221,22 +287,28 @@ export default function MainScreen({ onLogout }) {
     { key: 'role', label: 'Role' },
   ];
 
+
   const sidebarWidth = sidebarCollapsed ? 'w-16' : 'w-64';
+
 
   const indexOfLastRow = currentPage * rowsPerPage;
   const indexOfFirstRow = indexOfLastRow - rowsPerPage;
   const currentRows = sortedStudents.slice(indexOfFirstRow, indexOfLastRow);
   const totalPages = Math.ceil(sortedStudents.length / rowsPerPage);
 
+
   const handleNextPage = () => {
     if (currentPage < totalPages) setCurrentPage(currentPage + 1);
   };
+
 
   const handlePrevPage = () => {
     if (currentPage > 1) setCurrentPage(currentPage - 1);
   };
 
-  console.log('MainScreen: Rendering with students', students, 'sortedStudents', sortedStudents.map(s => s.firstname), 'searchTerm', searchTerm);
+
+  console.log('MainScreen: Rendering with students', students.map(s => ({ id: s.id, firstname: s.firstname, mail: s.mail })), 'sortedStudents', sortedStudents.map(s => ({ id: s.id, firstname: s.firstname, mail: s.mail })), 'searchTerm', searchTerm);
+
 
   return (
     <ErrorBoundary>
@@ -257,11 +329,13 @@ export default function MainScreen({ onLogout }) {
             </button>
           </div>
 
+
           <nav className="flex-1 p-4">
             <ul className="space-y-2">
               {menuItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeMenuItem === item.name;
+
 
                 return (
                   <li key={item.name}>
@@ -285,6 +359,7 @@ export default function MainScreen({ onLogout }) {
             </ul>
           </nav>
 
+
           <div className="p-4 border-t border-gray-700">
             <div className={`flex items-center space-x-3 ${sidebarCollapsed ? 'justify-center' : ''}`}>
               <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center">
@@ -299,6 +374,7 @@ export default function MainScreen({ onLogout }) {
             </div>
           </div>
         </aside>
+
 
         <div className="flex-1 flex flex-col min-w-0">
           <header className="bg-white shadow-sm border-b flex justify-between items-center px-6 h-16">
@@ -327,6 +403,7 @@ export default function MainScreen({ onLogout }) {
               )}
             </div>
           </header>
+
 
           <div className="px-6 py-4 bg-white border-b shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -378,6 +455,7 @@ export default function MainScreen({ onLogout }) {
                 </div>
               </div>
 
+
               <button
                 onClick={() => setAddModalOpen(true)}
                 className="flex items-center gap-2 bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-gray-700 shadow-sm text-sm font-medium transition-colors"
@@ -387,6 +465,7 @@ export default function MainScreen({ onLogout }) {
               </button>
             </div>
           </div>
+
 
           <main className="flex-1 p-6 overflow-x-auto">
             <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
@@ -428,7 +507,7 @@ export default function MainScreen({ onLogout }) {
                   ) : (
                     currentRows.map((student, index) => (
                       <tr
-                        key={student.id || `${student.mail}-${index}`}
+                        key={`${student.id || student.mail}-${uuidv4()}`}
                         className={`border-t border-gray-100 hover:bg-blue-50/50 transition-colors
                           ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}
                         `}
@@ -477,6 +556,7 @@ export default function MainScreen({ onLogout }) {
               </table>
             </div>
 
+
             {!loading && sortedStudents.length > 0 && (
               <div className="flex justify-between items-center px-6 py-4 bg-white border-t border-gray-200">
                 <button
@@ -500,6 +580,7 @@ export default function MainScreen({ onLogout }) {
             )}
           </main>
         </div>
+
 
         {editModalOpen && currentStudent && (
           <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50 p-4">
@@ -551,6 +632,7 @@ export default function MainScreen({ onLogout }) {
           </div>
         )}
 
+
         <AddStudentModal
           isOpen={addModalOpen}
           onClose={() => setAddModalOpen(false)}
@@ -560,3 +642,4 @@ export default function MainScreen({ onLogout }) {
     </ErrorBoundary>
   );
 }
+
